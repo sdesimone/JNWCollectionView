@@ -330,6 +330,11 @@ static void JNWCollectionViewCommonInit(JNWCollectionView *collectionView) {
 	}
 }
 
+- (void)reloadIndexPath:(NSIndexPath*)indexPath {
+    
+    [self reloadCellsWithIndexPathsToRemove:@[indexPath] indexPathsToAdd:@[indexPath] redraw:YES];
+}
+
 - (void)setCollectionViewLayout:(JNWCollectionViewLayout *)collectionViewLayout {
 	if (self.collectionViewLayout == collectionViewLayout)
 		return;
@@ -652,7 +657,91 @@ static void JNWCollectionViewCommonInit(JNWCollectionView *collectionView) {
 	[self layoutCellsWithRedraw:NO];
 }
 
+- (void)reloadCellsWithIndexPathsToRemove:(NSArray*)indexPathsToRemove
+                          indexPathsToAdd:(NSArray*)indexPathsToAdd
+                               redraw:(BOOL)needsVisibleRedraw {
+    
+    _collectionViewFlags.wantsLayout = YES;
+    [self.data recalculateAndPrepareLayout:YES];
+
+    if (self.dataSource == nil || !_collectionViewFlags.wantsLayout)
+        return;
+    
+    if (needsVisibleRedraw || [self.collectionViewLayout shouldApplyExistingLayoutAttributesOnLayout]) {
+        for (NSIndexPath *indexPath in self.visibleCellsMap.allKeys) {
+            JNWCollectionViewCell *cell = self.visibleCellsMap[indexPath];
+            JNWCollectionViewLayoutAttributes *attributes = [self.collectionViewLayout layoutAttributesForItemAtIndexPath:indexPath];
+            
+            [self applyLayoutAttributes:attributes toCell:cell];
+        }
+    }
+    
+    // Remove old cells and put them in the reuse queue
+    for (NSIndexPath *indexPath in indexPathsToRemove) {
+        JNWCollectionViewCell *cell = [self cellForItemAtIndexPath:indexPath];
+        [self.visibleCellsMap removeObjectForKey:indexPath];
+        [self enqueueReusableCell:cell withIdentifier:cell.reuseIdentifier];
+        
+        [cell setHidden:YES];
+        
+        if (_collectionViewFlags.delegateDidEndDisplayingCell) {
+            [self.delegate collectionView:self didEndDisplayingCell:cell forItemAtIndexPath:indexPath];
+        }
+    }
+    
+    // Add the new cells
+    for (NSIndexPath *indexPath in indexPathsToAdd) {
+        JNWCollectionViewCell *cell = [self.dataSource collectionView:self cellForItemAtIndexPath:indexPath];
+        
+        // If any of these are true this cell isn't valid, and we'll be forced to skip it and throw the relevant exceptions.
+        if (cell == nil || ![cell isKindOfClass:JNWCollectionViewCell.class]) {
+            NSAssert(cell != nil, @"collectionView:cellForItemAtIndexPath: must return a non-nil cell.");
+            // Although we have checked to ensure the class registered for the cell is a subclass
+            // of JNWCollectionViewCell earlier, there's always the chance that the user has
+            // not used the dedicated dequeuing method to retrieve their newly created cell and
+            // instead have just created it themselves. There's not much we can do to prevent this,
+            // so it's probably worth it to double check this one more time.
+            NSAssert([cell isKindOfClass:JNWCollectionViewCell.class],
+                     @"collectionView:cellForItemAtIndexPath: must return an instance or subclass of JNWCollectionViewCell.");
+            continue;
+        }
+        cell.indexPath = indexPath;
+        cell.collectionView = self;
+        
+        JNWCollectionViewLayoutAttributes *attributes = [self.collectionViewLayout layoutAttributesForItemAtIndexPath:indexPath];
+        [self applyLayoutAttributes:attributes toCell:cell];
+        
+        if (cell.superview == nil) {
+            [self.documentView addSubview:cell];
+        } else {
+            [cell setHidden:NO];
+        }
+        
+        if ([self.selectedIndexes containsObject:indexPath])
+            cell.selected = YES;
+        else
+            cell.selected = NO;
+        
+        self.visibleCellsMap[indexPath] = cell;
+    }
+}
+
 - (void)layoutCellsWithRedraw:(BOOL)needsVisibleRedraw {
+    
+    NSArray *oldVisibleIndexPaths = [self.visibleCellsMap allKeys];
+    NSArray *updatedVisibleIndexPaths = [self indexPathsForItemsInRect:self.documentVisibleRect];
+    
+    
+    NSMutableArray *indexPathsToRemove = [NSMutableArray arrayWithArray:oldVisibleIndexPaths];
+    [indexPathsToRemove removeObjectsInArray:updatedVisibleIndexPaths];
+    
+    NSMutableArray *indexPathsToAdd = [NSMutableArray arrayWithArray:updatedVisibleIndexPaths];
+    [indexPathsToAdd removeObjectsInArray:oldVisibleIndexPaths];
+
+    [self reloadCellsWithIndexPathsToRemove:indexPathsToRemove indexPathsToAdd:indexPathsToAdd redraw:needsVisibleRedraw];
+}
+
+- (void)layoutCellsWithRedrawOrig:(BOOL)needsVisibleRedraw {
 	if (self.dataSource == nil || !_collectionViewFlags.wantsLayout)
 		return;
 	

@@ -144,6 +144,10 @@ typedef NS_ENUM(NSInteger, JNWCollectionViewScrollPosition) {
 /// view has been completed.
 - (void)reloadData;
 
+/// Calling this method will cause the collection view to reload the specified view.
+///
+- (void)reloadIndexPath:(NSIndexPath*)indexPath;
+
 /// In order for cell or supplementary view dequeueing to occur, a class must be registered with the appropriate
 /// registration method.
 ///
